@@ -52,7 +52,7 @@
       <div class="flex items-center gap-2">
         <input id="optUserPdfMerge" type="checkbox" class="accent-blue-600" disabled>
         <label for="optUserPdfMerge" class="text-sm text-gray-700">
-          Nutzer-PDF: pro Raum Luftarten zusammenfassen (kompakter)
+          Nutzer-PDF: pro Raum Versorgung zusammenfassen (Luftarten → Anlagen)
         </label>
       </div>
     </div>
@@ -684,84 +684,108 @@
 
     doc.setFont("helvetica","bold");
     doc.setFontSize(14);
-    doc.text("Betroffene Räume – Übersicht (reduziert)", 40, 40);
+    doc.text("Betroffene Räume – Übersicht (Nutzer)", 40, 40);
 
     doc.setFont("helvetica","normal");
     doc.setFontSize(10);
     doc.text(`Quelle: ${state.meta.fileName || "-"} | Export: ${dt}`, 40, 58);
 
-    const blocks = groupByAnlageBlocks(state.filteredFlat);
-    const mergeByRoom = !!$("optUserPdfMerge")?.checked;
-
-    let startY = 80;
-
-    // Kopfzeile: deutlich grau, schwarze Schrift, zebra
+    // Kopfzeile: gut lesbar grau + Zebra (nicht blau, nicht blass)
     const headColor = [225, 225, 225];
     const headText  = [0, 0, 0];
 
-    for (const block of blocks){
-      doc.setFont("helvetica","bold");
-      doc.setFontSize(11);
-      doc.text(`Anlage: ${block.Anlage}`, 40, startY);
-      startY += 10;
+    const mergeByRoom = !!$("optUserPdfMerge")?.checked;
 
-      let head, body;
+    if (!mergeByRoom){
+      // Modus A: blockweise nach Anlage, Zeilen pro Luftart
+      const blocks = groupByAnlageBlocks(state.filteredFlat);
 
-      if (!mergeByRoom){
-        head = [[ "Raum", "Beschreibung", "Fassade", "Luftart" ]];
+      let startY = 80;
+      for (const block of blocks){
+        doc.setFont("helvetica","bold");
+        doc.setFontSize(11);
+        doc.text(`Anlage: ${block.Anlage}`, 40, startY);
+        startY += 10;
+
+        const head = [[ "Raum", "Beschreibung", "Fassade", "Luftart" ]];
 
         const seen = new Set();
-        body = [];
+        const body = [];
         for (const r of block.items){
           const key = `${r.Raumnummer}|${r.Raumbeschreibung}|${r.Fassade}|${r.Luftart}|${block.Anlage}`;
           if (seen.has(key)) continue;
           seen.add(key);
           body.push([r.Raumnummer, r.Raumbeschreibung, r.Fassade, r.Luftart]);
         }
-      } else {
-        head = [[ "Raum", "Beschreibung", "Fassade", "Luftarten (Bereich)" ]];
 
-        const map = new Map();
-        for (const r of block.items){
-          const roomKey = `${r.Raumnummer}|${r.Raumbeschreibung}|${r.Fassade}`;
-          if (!map.has(roomKey)){
-            map.set(roomKey, { raum:r.Raumnummer, bez:r.Raumbeschreibung, fas:r.Fassade, set:new Set() });
-          }
-          map.get(roomKey).set.add(`${r.Luftart} (${r.Bereich})`);
-        }
-
-        const rows = Array.from(map.values()).sort((a,b) =>
-          String(a.raum||"").localeCompare(String(b.raum||""),"de",{numeric:true})
-        );
-
-        body = rows.map(x => {
-          const list = Array.from(x.set).sort((a,b)=>a.localeCompare(b,"de",{numeric:true}));
-          return [x.raum, x.bez, x.fas, list.join(" | ")];
+        doc.autoTable({
+          head,
+          body,
+          startY: startY + 6,
+          styles: { font: "helvetica", fontSize: 8, cellPadding: 3, textColor: [0,0,0] },
+          headStyles: { fillColor: headColor, textColor: headText, fontStyle: "bold" },
+          alternateRowStyles: { fillColor: [245,245,245] },
+          margin: { left: 40, right: 40 },
         });
+
+        startY = doc.lastAutoTable.finalY + 18;
+        const pageHeight = doc.internal.pageSize.height;
+        if (startY > pageHeight - 60){
+          doc.addPage();
+          startY = 60;
+        }
       }
 
-      doc.autoTable({
-        head,
-        body,
-        startY: startY + 6,
-        styles: { font: "helvetica", fontSize: 8, cellPadding: 3, textColor: [0,0,0] },
-        headStyles: { fillColor: headColor, textColor: headText, fontStyle: "bold" },
-        alternateRowStyles: { fillColor: [245,245,245] },
-        margin: { left: 40, right: 40 },
-      });
-
-      startY = doc.lastAutoTable.finalY + 18;
-
-      const pageHeight = doc.internal.pageSize.height;
-      if (startY > pageHeight - 60){
-        doc.addPage();
-        startY = 60;
-      }
+      const safe = (state.meta.fileName || "raumzuordnung").replace(/\.[^.]+$/, "").replace(/[^a-z0-9_-]+/gi, "_");
+      doc.save(`${safe}_Nutzer_Uebersicht_anlagen_${now.toISOString().slice(0,10)}.pdf`);
+      return;
     }
 
+    // Modus B: pro Raum eine Zeile, Versorgung = Luftarten: Anlagen
+    const map = new Map();
+    for (const r of state.filteredFlat){
+      const roomKey = `${r.Raumnummer}|${r.Raumbeschreibung}|${r.Fassade}`;
+      if (!map.has(roomKey)){
+        map.set(roomKey, {
+          raum: r.Raumnummer,
+          bez: r.Raumbeschreibung,
+          fas: r.Fassade,
+          luft: new Map()
+        });
+      }
+      const obj = map.get(roomKey);
+      if (!obj.luft.has(r.Luftart)) obj.luft.set(r.Luftart, new Set());
+      obj.luft.get(r.Luftart).add(String(r.Anlage || "").trim());
+    }
+
+    const rows = Array.from(map.values()).sort((a,b)=>
+      String(a.raum||"").localeCompare(String(b.raum||""), "de", { numeric:true })
+    );
+
+    const head = [[ "Raum", "Beschreibung", "Fassade", "Versorgung (Luftart: Anlagen)" ]];
+    const body = rows.map(x => {
+      const parts = Array.from(x.luft.entries())
+        .sort((a,b)=>String(a[0]).localeCompare(String(b[0]), "de", { numeric:true }))
+        .map(([luftart, set]) => {
+          const list = Array.from(set).filter(Boolean).sort((a,b)=>String(a).localeCompare(String(b),"de",{numeric:true}));
+          return `${luftart}: ${list.join(", ")}`;
+        });
+      return [x.raum, x.bez, x.fas, parts.join(" | ")];
+    });
+
+    doc.autoTable({
+      head,
+      body,
+      startY: 80,
+      styles: { font: "helvetica", fontSize: 8, cellPadding: 3, textColor: [0,0,0] },
+      headStyles: { fillColor: headColor, textColor: headText, fontStyle: "bold" },
+      alternateRowStyles: { fillColor: [245,245,245] },
+      margin: { left: 40, right: 40 },
+      columnStyles: { 3: { cellWidth: 260 } }
+    });
+
     const safe = (state.meta.fileName || "raumzuordnung").replace(/\.[^.]+$/, "").replace(/[^a-z0-9_-]+/gi, "_");
-    const mode = mergeByRoom ? "kompakt" : "detail";
-    doc.save(`${safe}_Nutzer_Reduzierte_Uebersicht_${mode}_${now.toISOString().slice(0,10)}.pdf`);
+    doc.save(`${safe}_Nutzer_Uebersicht_raeume_${now.toISOString().slice(0,10)}.pdf`);
   }
 
   // Datei laden
