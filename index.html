@@ -24,26 +24,36 @@
 <body class="bg-gray-100 text-gray-900 p-4 sm:p-6 md:p-8">
   <div class="max-w-7xl mx-auto bg-white rounded-xl shadow-lg p-6 md:p-8">
 
-    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-6">
-      <div>
-        <h1 class="text-2xl md:text-3xl font-bold">RLT Raumzuordnung – Suche & PDF</h1>
-        <p class="text-sm text-gray-600 mt-1">
-          Excel laden → filtern → Ansicht wählen (Versorgung / Räume / Anlagen) → PDF exportieren.
-        </p>
+    <div class="flex flex-col gap-3 mb-6">
+      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+        <div>
+          <h1 class="text-2xl md:text-3xl font-bold">RLT Raumzuordnung – Suche & PDF</h1>
+          <p class="text-sm text-gray-600 mt-1">
+            Excel laden → filtern → Ansicht wählen (Versorgung / Räume / Anlagen) → PDF exportieren.
+          </p>
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+          <button id="btnPdf"
+            class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition disabled:bg-gray-400 disabled:cursor-not-allowed"
+            disabled>
+            PDF (intern)
+          </button>
+
+          <button id="btnPdfUser"
+            class="bg-white hover:bg-gray-50 border border-gray-300 text-gray-900 font-bold py-2 px-4 rounded-lg shadow-sm transition disabled:bg-gray-100 disabled:cursor-not-allowed"
+            disabled>
+            PDF Nutzer (reduziert)
+          </button>
+        </div>
       </div>
 
-      <div class="flex flex-wrap gap-2">
-        <button id="btnPdf"
-          class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition disabled:bg-gray-400 disabled:cursor-not-allowed"
-          disabled>
-          PDF (intern)
-        </button>
-
-        <button id="btnPdfUser"
-          class="bg-white hover:bg-gray-50 border border-gray-300 text-gray-900 font-bold py-2 px-4 rounded-lg shadow-sm transition disabled:bg-gray-100 disabled:cursor-not-allowed"
-          disabled>
-          PDF Nutzer (reduziert)
-        </button>
+      <!-- Nutzer-PDF Option -->
+      <div class="flex items-center gap-2">
+        <input id="optUserPdfMerge" type="checkbox" class="accent-blue-600" disabled>
+        <label for="optUserPdfMerge" class="text-sm text-gray-700">
+          Nutzer-PDF: pro Raum Luftarten zusammenfassen (kompakter)
+        </label>
       </div>
     </div>
 
@@ -230,7 +240,7 @@
     flat: [],
     filteredFlat: [],
     filteredRooms: [],
-    filteredAnlagenBlocks: [], // [{Anlage, items:[...]}]
+    filteredAnlagenBlocks: [],
     meta: { fileName:"", sheetName:"", roomCount:0, flatCount:0 },
     viewMode: "flat",
     filters: { anlage:"", text:"", etage:"Alle", fassade:"Alle", bereich:"Alle", luftart:"Alle", nutzung:"Alle" }
@@ -255,11 +265,13 @@
   }
 
   function enableControls(){
-    ["f_anlage","f_text","f_etage","f_fassade","f_bereich","f_luftart","f_nutzung","btnReset","btnPdf","btnPdfUser","view_flat","view_rooms","view_anlagen"]
+    ["f_anlage","f_text","f_etage","f_fassade","f_bereich","f_luftart","f_nutzung",
+     "btnReset","btnPdf","btnPdfUser","view_flat","view_rooms","view_anlagen","optUserPdfMerge"]
       .forEach(id => $(id).disabled = false);
   }
   function disableControls(){
-    ["f_anlage","f_text","f_etage","f_fassade","f_bereich","f_luftart","f_nutzung","btnReset","btnPdf","btnPdfUser","view_flat","view_rooms","view_anlagen"]
+    ["f_anlage","f_text","f_etage","f_fassade","f_bereich","f_luftart","f_nutzung",
+     "btnReset","btnPdf","btnPdfUser","view_flat","view_rooms","view_anlagen","optUserPdfMerge"]
       .forEach(id => $(id).disabled = true);
   }
 
@@ -307,14 +319,12 @@
     sel.value = [...sel.options].some(o => o.value === cur) ? cur : "Alle";
   }
 
-  // Multi-Anlagen-Parsing (ODER)
   function parseAnlageQuery(text){
     const raw = String(text || "").trim();
     if (!raw) return [];
     return raw.split(/[\s,;|]+/g).map(s => s.trim()).filter(Boolean);
   }
 
-  // Einheitliche Sortierung nach Etage/Raum (natürlich)
   function sortByEtageRaum(a, b){
     const ea = String(a.Etage||"");
     const eb = String(b.Etage||"");
@@ -350,27 +360,21 @@
     if (f.luftart !== "Alle") rows = rows.filter(r => r.Luftart === f.luftart);
     if (f.nutzung !== "Alle") rows = rows.filter(r => r.Raumnutzungsart === f.nutzung);
 
-    // Für flache Ansicht: nach Etage/Raum sortieren
     rows.sort(sortByEtageRaum);
     state.filteredFlat = rows;
 
-    // Räume gruppiert
     state.filteredRooms = groupByRoom(state.filteredFlat);
-
-    // Anlagen gruppiert (Blockdarstellung)
     state.filteredAnlagenBlocks = groupByAnlageBlocks(state.filteredFlat);
 
     render();
     updateCounters();
 
-    // Buttons aktivieren/deaktivieren
     const hasAny =
       (state.viewMode === "flat" && state.filteredFlat.length) ||
       (state.viewMode === "rooms" && state.filteredRooms.length) ||
       (state.viewMode === "anlagen" && state.filteredAnlagenBlocks.length);
 
     $("btnPdf").disabled = !hasAny;
-    // Nutzer-PDF macht nur Sinn wenn es Treffer gibt
     $("btnPdfUser").disabled = state.filteredFlat.length === 0;
   }
 
@@ -397,9 +401,7 @@
     return out;
   }
 
-  // NEU: Anlagen-Blocks
   function groupByAnlageBlocks(flatRows){
-    // Pro Anlage: Einträge (redundante Einträge pro Raum/Luftart bleiben sichtbar)
     const map = new Map();
     for (const r of flatRows){
       const key = toStr(r.Anlage) || "Unbekannt";
@@ -407,11 +409,9 @@
       map.get(key).push(r);
     }
 
-    // Sortiere Anlagen nach natürlicher Reihenfolge
     const keys = Array.from(map.keys()).sort((a,b)=>String(a).localeCompare(String(b), "de", { numeric:true }));
 
-    // Innerhalb Anlage: nach Etage/Raum, dann Luftart
-    const blocks = keys.map(anlage => {
+    return keys.map(anlage => {
       const items = map.get(anlage).slice().sort((a,b) => {
         const c = sortByEtageRaum(a,b);
         if (c) return c;
@@ -419,8 +419,6 @@
       });
       return { Anlage: anlage, items };
     });
-
-    return blocks;
   }
 
   function updateCounters(){
@@ -430,7 +428,6 @@
   }
 
   function render(){
-    // Sichtbarkeit
     $("table_flat").classList.toggle("hidden", state.viewMode !== "flat");
     $("table_rooms").classList.toggle("hidden", state.viewMode !== "rooms");
     $("view_anlagen_blocks").classList.toggle("hidden", state.viewMode !== "anlagen");
@@ -586,7 +583,6 @@
     applyFilters();
   }
 
-  // PDF intern = je nach aktueller Ansicht
   function exportPdfInternal(){
     if (!(window.jspdf && window.jspdf.jsPDF)){
       setStatus("err","PDF-Bibliothek nicht verfügbar (jsPDF wurde nicht geladen).");
@@ -675,7 +671,6 @@
     doc.save(`${safe}_${mode}_intern_${now.toISOString().slice(0,10)}.pdf`);
   }
 
-  // PDF Nutzer (reduziert): Blockweise nach Anlage (immer!)
   function exportPdfUserReduced(){
     if (!(window.jspdf && window.jspdf.jsPDF)){
       setStatus("err","PDF-Bibliothek nicht verfügbar (jsPDF wurde nicht geladen).");
@@ -695,48 +690,68 @@
     doc.setFontSize(10);
     doc.text(`Quelle: ${state.meta.fileName || "-"} | Export: ${dt}`, 40, 58);
 
-    // Wir nehmen die aktuelle Trefferliste (filteredFlat) und gruppieren sie in Anlagen-Blöcke
     const blocks = groupByAnlageBlocks(state.filteredFlat);
+    const mergeByRoom = !!$("optUserPdfMerge")?.checked;
 
-    // Reduzierte Tabelle: Raum, Beschreibung, Fassade, Luftart, Anlage
-    // Blockweise: pro Anlage eine Überschriftszeile
     let startY = 80;
 
+    // Kopfzeile: deutlich grau, schwarze Schrift, zebra
+    const headColor = [225, 225, 225];
+    const headText  = [0, 0, 0];
+
     for (const block of blocks){
-      // Überschrift
       doc.setFont("helvetica","bold");
       doc.setFontSize(11);
       doc.text(`Anlage: ${block.Anlage}`, 40, startY);
-      startY += 8;
+      startY += 10;
 
-      doc.setFont("helvetica","normal");
-      doc.setFontSize(8);
+      let head, body;
 
-      const head = [[ "Raum", "Beschreibung", "Fassade", "Luftart" ]];
+      if (!mergeByRoom){
+        head = [[ "Raum", "Beschreibung", "Fassade", "Luftart" ]];
 
-      // Optional: pro Anlage doppelte Zeilen rauswerfen (gleicher Raum + Luftart)
-      const seen = new Set();
-      const body = [];
-      for (const r of block.items){
-        const key = `${r.Raumnummer}|${r.Raumbeschreibung}|${r.Fassade}|${r.Luftart}|${block.Anlage}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        body.push([r.Raumnummer, r.Raumbeschreibung, r.Fassade, r.Luftart]);
+        const seen = new Set();
+        body = [];
+        for (const r of block.items){
+          const key = `${r.Raumnummer}|${r.Raumbeschreibung}|${r.Fassade}|${r.Luftart}|${block.Anlage}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          body.push([r.Raumnummer, r.Raumbeschreibung, r.Fassade, r.Luftart]);
+        }
+      } else {
+        head = [[ "Raum", "Beschreibung", "Fassade", "Luftarten (Bereich)" ]];
+
+        const map = new Map();
+        for (const r of block.items){
+          const roomKey = `${r.Raumnummer}|${r.Raumbeschreibung}|${r.Fassade}`;
+          if (!map.has(roomKey)){
+            map.set(roomKey, { raum:r.Raumnummer, bez:r.Raumbeschreibung, fas:r.Fassade, set:new Set() });
+          }
+          map.get(roomKey).set.add(`${r.Luftart} (${r.Bereich})`);
+        }
+
+        const rows = Array.from(map.values()).sort((a,b) =>
+          String(a.raum||"").localeCompare(String(b.raum||""),"de",{numeric:true})
+        );
+
+        body = rows.map(x => {
+          const list = Array.from(x.set).sort((a,b)=>a.localeCompare(b,"de",{numeric:true}));
+          return [x.raum, x.bez, x.fas, list.join(" | ")];
+        });
       }
 
       doc.autoTable({
         head,
         body,
         startY: startY + 6,
-        styles: { font: "helvetica", fontSize: 8, cellPadding: 3 },
-        headStyles: { fillColor: [240,240,240] },
+        styles: { font: "helvetica", fontSize: 8, cellPadding: 3, textColor: [0,0,0] },
+        headStyles: { fillColor: headColor, textColor: headText, fontStyle: "bold" },
+        alternateRowStyles: { fillColor: [245,245,245] },
         margin: { left: 40, right: 40 },
-        didDrawPage: (data) => {},
       });
 
       startY = doc.lastAutoTable.finalY + 18;
 
-      // Seitenumbruch, wenn nötig
       const pageHeight = doc.internal.pageSize.height;
       if (startY > pageHeight - 60){
         doc.addPage();
@@ -745,10 +760,11 @@
     }
 
     const safe = (state.meta.fileName || "raumzuordnung").replace(/\.[^.]+$/, "").replace(/[^a-z0-9_-]+/gi, "_");
-    doc.save(`${safe}_Nutzer_Reduzierte_Uebersicht_${now.toISOString().slice(0,10)}.pdf`);
+    const mode = mergeByRoom ? "kompakt" : "detail";
+    doc.save(`${safe}_Nutzer_Reduzierte_Uebersicht_${mode}_${now.toISOString().slice(0,10)}.pdf`);
   }
 
-  // ====== Datei laden ======
+  // Datei laden
   $("file").addEventListener("change", (event) => {
     const file = event.target.files && event.target.files[0];
     if (!file) return;
@@ -850,8 +866,6 @@
           setStatus("ok", `Datei geladen: ${file.name} – Räume: ${state.meta.roomCount} / Versorgungseinträge: ${state.meta.flatCount}`);
         }
 
-        // Default: Anlagen gruppiert, wenn mehr als eine Anlage eingegeben wird (hilft im Störfall),
-        // sonst bei Versorgungseinträgen bleiben.
         state.viewMode = "flat";
         $("view_flat").checked = true;
 
@@ -867,11 +881,10 @@
     reader.readAsArrayBuffer(file);
   });
 
-  // ====== Filter Events ======
+  // Filter Events
   $("f_anlage").addEventListener("input", e => {
     state.filters.anlage = e.target.value;
 
-    // Komfort: Wenn mehrere Anlagen eingegeben werden, automatisch auf „Anlagen gruppiert“ umschalten
     const tokens = parseAnlageQuery(state.filters.anlage);
     if (tokens.length >= 2){
       state.viewMode = "anlagen";
@@ -890,7 +903,6 @@
     });
   });
 
-  // Ansicht Umschalter
   $("view_flat").addEventListener("change", () => { if ($("view_flat").checked){ state.viewMode = "flat"; render(); } });
   $("view_rooms").addEventListener("change", () => { if ($("view_rooms").checked){ state.viewMode = "rooms"; render(); } });
   $("view_anlagen").addEventListener("change", () => { if ($("view_anlagen").checked){ state.viewMode = "anlagen"; render(); } });
